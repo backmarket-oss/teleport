@@ -509,7 +509,7 @@ func newGCPTLSDialer(tlsConfig *tls.Config) client.Dialer {
 func FetchMySQLVersion(ctx context.Context, database types.Database) (string, error) {
 	var dialer client.Dialer
 
-	if database.IsCloudSQL() {
+	if database.IsCloudSQL() || database.IsAlloyDB() {
 		dialer = newGCPTLSDialer(&tls.Config{})
 	} else {
 		var nd net.Dialer

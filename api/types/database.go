@@ -85,6 +85,8 @@ type Database interface {
 	SetAWSAssumeRole(roleARN string)
 	// GetGCP returns GCP information for Cloud SQL databases.
 	GetGCP() GCPCloudSQL
+	// GetAlloyDB returns GCP information for AlloyDB databases.
+	GetAlloyDB() AlloyDB
 	// GetAzure returns Azure database server metadata.
 	GetAzure() Azure
 	// SetStatusAzure sets the database Azure metadata in the status field.
@@ -109,6 +111,8 @@ type Database interface {
 	IsRedshift() bool
 	// IsCloudSQL returns true if this is a Cloud SQL database.
 	IsCloudSQL() bool
+	// IsAlloyDB returns true if this is a Cloud SQL database.
+	IsAlloyDB() bool
 	// IsAzure returns true if this is an Azure database.
 	IsAzure() bool
 	// IsElastiCache returns true if this is an AWS ElastiCache database.
@@ -473,6 +477,11 @@ func (d *DatabaseV3) IsCloudSQL() bool {
 	return d.GetType() == DatabaseTypeCloudSQL
 }
 
+// IsAlloyDB returns true if this database is an AlloyDB cluster.
+func (d *DatabaseV3) IsAlloyDB() bool {
+	return d.GetType() == DatabaseTypeAlloyDB
+}
+
 // IsAzure returns true if this is Azure hosted database.
 func (d *DatabaseV3) IsAzure() bool {
 	return d.GetType() == DatabaseTypeAzure
@@ -512,7 +521,7 @@ func (d *DatabaseV3) IsAWSHosted() bool {
 // IsCloudHosted returns true if database is hosted in the cloud (AWS, Azure or
 // Cloud SQL).
 func (d *DatabaseV3) IsCloudHosted() bool {
-	return d.IsAWSHosted() || d.IsCloudSQL() || d.IsAzure()
+	return d.IsAWSHosted() || d.IsCloudSQL() || d.IsAlloyDB() || d.IsAzure()
 }
 
 // GetCloud gets the cloud this database is running on, or an empty string if it
@@ -522,6 +531,8 @@ func (d *DatabaseV3) GetCloud() string {
 	case d.IsAWSHosted():
 		return CloudAWS
 	case d.IsCloudSQL():
+		return CloudGCP
+	case d.IsAlloyDB():
 		return CloudGCP
 	case d.IsAzure():
 		return CloudAzure
@@ -1061,6 +1072,8 @@ const (
 	DatabaseTypeRedshiftServerless = "redshift-serverless"
 	// DatabaseTypeCloudSQL is GCP-hosted Cloud SQL database.
 	DatabaseTypeCloudSQL = "gcp"
+	// DatabaseTypeAlloyDB is GCP-hosted AlloyDB database.
+	DatabaseTypeAlloyDB = "alloydb"
 	// DatabaseTypeAzure is Azure-hosted database.
 	DatabaseTypeAzure = "azure"
 	// DatabaseTypeElastiCache is AWS-hosted ElastiCache database.

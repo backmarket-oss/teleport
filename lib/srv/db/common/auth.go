@@ -82,6 +82,8 @@ type Auth interface {
 	GetCloudSQLAuthToken(ctx context.Context, sessionCtx *Session) (string, error)
 	// GetCloudSQLPassword generates password for a Cloud SQL database user.
 	GetCloudSQLPassword(ctx context.Context, sessionCtx *Session) (string, error)
+	// GetAlloyDBAuthToken generates AlloyDB auth token.
+	GetAlloyDBAuthToken(ctx context.Context, sessionCtx *Session) (string, error)
 	// GetAzureAccessToken generates Azure database access token.
 	GetAzureAccessToken(ctx context.Context, sessionCtx *Session) (string, error)
 	// GetAzureCacheForRedisToken retrieves auth token for Azure Cache for Redis.
@@ -459,6 +461,44 @@ Make sure Teleport db service has "Cloud SQL Admin" GCP IAM role, or
 	return nil
 }
 
+// GetAlloyDBAuthToken returns authorization token that will be used as a
+// password when connecting to Cloud SQL databases.
+func (a *dbAuth) GetAlloyDBAuthToken(ctx context.Context, sessionCtx *Session) (string, error) {
+	gcpIAM, err := a.cfg.Clients.GetGCPIAMClient(ctx)
+	if err != nil {
+		return "", trace.Wrap(err)
+	}
+	a.cfg.Log.Debugf("Generating GCP AlloyDB auth token for %s.", sessionCtx)
+	resp, err := gcpIAM.GenerateAccessToken(ctx,
+		&gcpcredentialspb.GenerateAccessTokenRequest{
+			// From GenerateAccessToken docs:
+			//
+			// The resource name of the service account for which the credentials
+			// are requested, in the following format:
+			//   projects/-/serviceAccounts/{ACCOUNT_EMAIL_OR_UNIQUEID}
+			Name: fmt.Sprintf("projects/-/serviceAccounts/%v.gserviceaccount.com", sessionCtx.DatabaseUser),
+			// From GenerateAccessToken docs:
+			//
+			// Code to identify the scopes to be included in the OAuth 2.0 access
+			// token:
+			//   https://developers.google.com/identity/protocols/oauth2/scopes
+			//   https://developers.google.com/identity/protocols/oauth2/scopes#sqladmin
+			Scope: []string{
+				"https://www.googleapis.com/auth/alloydb.login",
+			},
+		})
+	if err != nil {
+		return "", trace.AccessDenied(`Could not generate GCP IAM auth token:
+
+  %v
+
+Make sure Teleport db service has "Service Account Token Creator" GCP IAM role,
+or "iam.serviceAccounts.getAccessToken" IAM permission.
+`, err)
+	}
+	return resp.AccessToken, nil
+}
+
 // GetAzureAccessToken generates Azure database access token.
 func (a *dbAuth) GetAzureAccessToken(ctx context.Context, sessionCtx *Session) (string, error) {
 	a.cfg.Log.Debugf("Generating Azure access token for %s.", sessionCtx)
@@ -621,15 +661,21 @@ func (a *dbAuth) getTLSConfigVerifyFull(ctx context.Context, sessionCtx *Session
 	//
 	// See the following Go issue for more context:
 	//   https://github.com/golang/go/issues/40748
-	if sessionCtx.Database.IsCloudSQL() {
+	if sessionCtx.Database.IsCloudSQL() || sessionCtx.Database.IsAlloyDB() {
 		// Cloud SQL server presented certificates encode instance names as
 		// "<project-id>:<instance-id>" in CommonName. This is verified against
 		// the ServerName in a custom connection verification step (see below).
 		tlsConfig.ServerName = sessionCtx.Database.GetGCP().GetServerName()
 		// This just disables default verification.
 		tlsConfig.InsecureSkipVerify = true
-		// This will verify CN and cert chain on each connection.
-		tlsConfig.VerifyConnection = getVerifyCloudSQLCertificate(tlsConfig.RootCAs)
+		if sessionCtx.Database.IsCloudSQL() {
+			// This will verify CN and cert chain on each connection.
+			tlsConfig.VerifyConnection = getVerifyCloudSQLCertificate(tlsConfig.RootCAs)
+		}
+		if sessionCtx.Database.IsAlloyDB() {
+			// This will verify CN and cert chain on each connection.
+			tlsConfig.VerifyConnection = getVerifyAlloyDBCertificate(tlsConfig.RootCAs)
+		}
 	}
 
 	// Setup server name for verification.
@@ -1018,15 +1064,25 @@ func (a *dbAuth) Close() error {
 // getVerifyCloudSQLCertificate returns a function that performs verification
 // of server certificate presented by a Cloud SQL database instance.
 func getVerifyCloudSQLCertificate(roots *x509.CertPool) func(tls.ConnectionState) error {
+	return verifyGCPDatabaseCertificate(roots, "Cloud SQL")
+}
+
+// getVerifyAlloyDBCertificate returns a function that performs verification
+// of server certificate presented by an AlloyDB database cluster.
+func getVerifyAlloyDBCertificate(roots *x509.CertPool) func(tls.ConnectionState) error {
+	return verifyGCPDatabaseCertificate(roots, "AlloyDB")
+}
+
+func verifyGCPDatabaseCertificate(roots *x509.CertPool, databaseTypeName string) func(tls.ConnectionState) error {
 	return func(cs tls.ConnectionState) error {
 		if len(cs.PeerCertificates) < 1 {
-			return trace.AccessDenied("Cloud SQL instance didn't present a certificate")
+			return trace.AccessDenied("%q instance didn't present a certificate", databaseTypeName)
 		}
 		// CN has been deprecated for a while, but Cloud SQL instances still use
 		// it to encode instance name in the form of <project-id>:<instance-id>.
 		commonName := cs.PeerCertificates[0].Subject.CommonName
 		if commonName != cs.ServerName {
-			return trace.AccessDenied("Cloud SQL certificate CommonName validation failed: expected %q, got %q", cs.ServerName, commonName)
+			return trace.AccessDenied("%q certificate CommonName validation failed: expected %q, got %q", databaseTypeName, cs.ServerName, commonName)
 		}
 		opts := x509.VerifyOptions{Roots: roots, Intermediates: x509.NewCertPool()}
 		for _, cert := range cs.PeerCertificates[1:] {

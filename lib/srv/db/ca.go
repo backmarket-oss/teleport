@@ -310,6 +310,8 @@ func (d *realDownloader) Download(ctx context.Context, database types.Database, 
 		return d.downloadFromURL(amazonRootCA1URL)
 	case types.DatabaseTypeCloudSQL:
 		return d.downloadForCloudSQL(ctx, database)
+	case types.DatabaseTypeAlloyDB:
+		return d.downloadForAlloyDB(ctx, database)
 	case types.DatabaseTypeAzure:
 		if strings.HasSuffix(azureCAURLBaltimore, hint) {
 			return d.downloadFromURL(azureCAURLBaltimore)
@@ -398,6 +400,31 @@ func (d *realDownloader) downloadForCloudSQL(ctx context.Context, database types
 
 	return nil, nil, trace.NotFound("Cloud SQL instance %v does not contain server CA certificate info: %v",
 		database, instance)
+}
+
+// downloadForAlloyDB downloads root certificate for the provided AlloyDB
+// instance.
+//
+// This database service GCP IAM role should have "alloydb.instances.get"
+// permission in order for this to work.
+func (d *realDownloader) downloadForAlloyDB(ctx context.Context, database types.Database) ([]byte, error) {
+	cl, err := d.getAlloyDBClient(ctx)
+	if err != nil {
+		return nil, trace.Wrap(err)
+	}
+
+	clientCertificate, err := cl.GenerateClientCertificate(ctx, database)
+	if err != nil {
+		// TODO: Change the error message pattern
+		return nil, trace.BadParameter(cloudSQLDownloadError, database.GetName(),
+			err, database.GetGCP().InstanceID)
+	}
+
+	if clientCertificate.CaCert != nil {
+		return []byte(clientCertificate.CaCert), nil
+	}
+
+	return nil, trace.NotFound("Could not download the AlloyDB cluster %v CA certificate info", database)
 }
 
 // getVersionFromURL fetches the CA version from the URL without downloading it.

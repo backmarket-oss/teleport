@@ -258,6 +258,7 @@ func NewClients(opts ...ClientsOption) (Clients, error) {
 			gcpSQLAdmin:  newClientCache[gcp.SQLAdminClient](gcp.NewSQLAdminClient),
 			gcpGKE:       newClientCache[gcp.GKEClient](gcp.NewGKEClient),
 			gcpInstances: newClientCache[gcp.InstancesClient](gcp.NewInstancesClient),
+			gcpAlloyDB:   newClientCache[gcp.AlloyDBClient](gcp.NewAlloyDBClient),
 		},
 		azureClients: azClients,
 	}
@@ -317,6 +318,8 @@ type gcpClients struct {
 	gcpGKE *clientCache[gcp.GKEClient]
 	// gcpInstances is the cached GCP instances client.
 	gcpInstances *clientCache[gcp.InstancesClient]
+	// gcpAlloyDB is the cached GCP AlloyDB client.
+	gcpAlloyDB *clientCache[gcp.AlloyDBClient]
 }
 
 // azureClients contains Azure-specific clients.

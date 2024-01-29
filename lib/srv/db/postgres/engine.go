@@ -537,6 +537,30 @@ func (e *Engine) getConnectConfig(ctx context.Context, sessionCtx *common.Sessio
 				return nil, trace.Wrap(err)
 			}
 		}
+	case types.DatabaseTypeAlloyDB:
+		config.Password, err = e.Auth.GetAlloyDBAuthToken(ctx, sessionCtx)
+		if err != nil {
+			return nil, trace.Wrap(err)
+		}
+		// Get the client once for subsequent calls (it acquires a read lock).
+		gcpClient, err := e.CloudClients.GetGCPAlloyDBClient(ctx)
+		if err != nil {
+			return nil, trace.Wrap(err)
+		}
+		// Detect whether the instance is set to require SSL.
+		// Fallback to not requiring SSL for access denied errors.
+		requireSSL, err := cloud.GetAlloyDBRequireSSL(ctx, sessionCtx, gcpClient)
+		if err != nil && !trace.IsAccessDenied(err) {
+			return nil, trace.Wrap(err)
+		}
+		// Create ephemeral certificate and append to TLS config when
+		// the instance requires SSL.
+		if requireSSL {
+			err = cloud.AppendGCPAlloyDBClientCert(ctx, sessionCtx, gcpClient, config.TLSConfig)
+			if err != nil {
+				return nil, trace.Wrap(err)
+			}
+		}
 	case types.DatabaseTypeAzure:
 		config.Password, err = e.Auth.GetAzureAccessToken(ctx, sessionCtx)
 		if err != nil {

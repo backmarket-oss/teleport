@@ -333,6 +333,7 @@ func (a *dbAuth) GetCloudSQLAuthToken(ctx context.Context, sessionCtx *Session) 
 			//   https://developers.google.com/identity/protocols/oauth2/scopes#sqladmin
 			Scope: []string{
 				"https://www.googleapis.com/auth/sqlservice.admin",
+				"https://www.googleapis.com/auth/alloydb.login",
 			},
 		})
 	if err != nil {

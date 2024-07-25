@@ -417,6 +417,8 @@ func (a *dbAuth) GetCloudSQLAuthToken(ctx context.Context, databaseUser string) 
 	//   https://developers.google.com/identity/protocols/oauth2/scopes#sqladmin
 	scopes := []string{
 		"https://www.googleapis.com/auth/sqlservice.admin",
+		"https://www.googleapis.com/auth/alloydb.login",
+
 	}
 	ts, err := a.getCloudTokenSource(ctx, databaseUser, scopes)
 	if err != nil {
